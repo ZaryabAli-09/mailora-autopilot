@@ -1,97 +1,39 @@
-// libraries imports
 import "dotenv/config";
 import express from "express";
-import dotenv from "dotenv";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
-
-// db config, errors middlewares and response handlers imports
-import { errorMiddleware } from "./middlewares/error.middleware.js";
 import { connectDB } from "./configs/dbConnection.js";
+import { authRouter } from "./routes/auth.routes.js";
+import { errorMiddleware } from "./middlewares/error.middleware.js";
 
-// load environment variables in development as a fallback
-if (process.env.NODE_ENV !== "production") {
-  dotenv.config();
-}
-
-// initializing express app
 const app = express();
+const port = Number(process.env.PORT || 8000);
+const clientUrl = process.env.CLIENT_URL || "http://localhost:3000";
 
-// port definition
-const PORT = process.env.PORT || 8000;
-const PROD_FRONTEND_URL = process.env.PROD_FRONTEND_URL;
-const DEV_FRONTEND_URL = process.env.DEV_FRONTEND_URL;
-const allowedOrigins = [PROD_FRONTEND_URL, DEV_FRONTEND_URL];
+app.disable("x-powered-by");
+app.use(helmet());
+app.use(cors({ origin: clientUrl, credentials: true, methods: ["GET", "POST"] }));
+app.use(compression());
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+app.use(express.json());
+app.use(cookieParser());
 
-// built-in middlewares
-app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization"],
-    optionsSuccessStatus: 200,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  }),
-);
-
-app.use(morgan("combined")); // for logging requests in development
-app.use(helmet()); // for security
-app.use(express.json()); // for parsing JSON request bodies
-app.use(express.urlencoded({ extended: true })); // for parsing form data
-app.use(compression()); // for compressing responses
-app.use(cookieParser()); // for parsing cookies
-
-// health check endpoint
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "UP",
-    api: "mailora-autopilot-api",
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// root endpoint
-app.get("/", (req, res) => {
-  res.status(200).json({
-    message: `Welcome to ${process.env.API_NAME}|| mailora-autopilot-api`,
-    version: "1.0.0",
-    enpoints: [
-      {
-        method: "GET",
-        endpoint: "/health",
-        description: "Health check endpoint",
-      },
-    ],
-  });
-});
-
-// routes
-
-// 404 handler for undefined routes
-app.use((req, res, next) => {
-  res.status(404).json({
-    status: "error",
-    data: null,
-    message: "Route not found",
-  });
-});
-
-// error handling middleware
+app.get("/health", (_req, res) => res.json({ status: "ok" }));
+app.use("/auth", authRouter);
+app.use((_req, res) => res.status(404).json({ message: "Route not found" }));
 app.use(errorMiddleware);
 
-async function startServer() {
+if (process.env.NODE_ENV !== "test") {
   try {
-    app.listen(PORT, () => {
-      console.log(`🚀 ${process.env.API_NAME} is running on port ${PORT}`);
-    });
-
     await connectDB();
+    app.listen(port, () => console.log(`Mailora API listening on ${port}`));
   } catch (error) {
-    console.error("Failed to start server", error);
+    console.error("API startup failed:", error);
+    process.exit(1);
   }
 }
 
-startServer();
+export { app };
