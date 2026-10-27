@@ -1,123 +1,204 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowUp, Inbox, MailCheck, Search, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Bot, MailCheck } from "lucide-react";
+import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Toaster } from "@/components/ui/sonner";
 import { SignOutButton } from "@/components/sign-out-button";
-
-const prompts = ["Organize my inbox", "What needs my attention today?", "Find newsletters I can unsubscribe from"];
-const categories = ["All", "Urgent", "Todos", "Meetings", "Newsletters"] as const;
-type Category = (typeof categories)[number];
-type Message = { role: "user" | "agent"; text: string };
-const mockEmails: { sender: string; email: string; subject: string; preview: string; time: string; category: Exclude<Category, "All"> }[] = [
-  { sender: "Maya Chen", email: "maya@example.com", subject: "Quick review on the launch plan", preview: "Could you take a look before we share this with the team?", time: "9:42 AM", category: "Urgent" },
-  { sender: "Jonah Brooks", email: "jonah@example.com", subject: "Follow up on Tuesday's notes", preview: "I added the open questions and next steps to the document.", time: "8:18 AM", category: "Todos" },
-  { sender: "Lena Ortiz", email: "lena@example.com", subject: "Coffee next week?", preview: "Would Thursday afternoon work for a quick catch up?", time: "Yesterday", category: "Meetings" },
-  { sender: "The Weekly Edit", email: "weekly@example.com", subject: "Ideas worth keeping this week", preview: "A short collection of reads for a more focused week.", time: "Yesterday", category: "Newsletters" },
-  { sender: "Amir Patel", email: "amir@example.com", subject: "Budget numbers are ready", preview: "The updated sheet is ready when you have a moment.", time: "Mon", category: "Todos" },
-];
+import { ThreadList } from "@/components/inbox/thread-list";
+import { ThreadReader } from "@/components/inbox/thread-reader";
+import { SnoozeDialog } from "@/components/inbox/snooze-dialog";
+import { AgentPanel } from "@/components/inbox/agent-panel";
+import { getThread, listInbox, markDone, retrySync, setPinned, snoozeThread, type AgentAction, type InboxView, type SyncStatus, type ThreadDetail, type ThreadSummary } from "@/lib/mail-api";
 
 export function AppShell({ user }: { user: { name: string; email: string; avatarUrl: string | null } }) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [draft, setDraft] = useState("");
-  const [tab, setTab] = useState<Category>("All");
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [view, setView] = useState<InboxView>("all");
+  const [listLoading, setListLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [reload, setReload] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ThreadDetail | null>(null);
+  const [detailError, setDetailError] = useState<{ id: string; message: string } | null>(null);
+  const [detailReload, setDetailReload] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [mobileReaderOpen, setMobileReaderOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const listGeneration = useRef(0);
+  const detailGeneration = useRef(0);
+
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), 850);
+    const timer = window.setTimeout(() => {
+      if (search.trim() === query) return;
+      setListLoading(true);
+      setListError(null);
+      setQuery(search.trim());
+    }, 300);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [search, query]);
 
-  function send(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    setMessages((current) => [...current, { role: "user", text: trimmed }, { role: "agent", text: "I’m ready to help. Email actions and AI replies are coming soon." }]);
-    setDraft("");
+  useEffect(() => {
+    const generation = ++listGeneration.current;
+    listInbox(query, "", view).then((page) => {
+      if (generation !== listGeneration.current) return;
+      setThreads(page.threads);
+      setNextCursor(page.nextCursor);
+      setSync(page.sync);
+      setSelectedId((current) => page.threads.some((item) => item.id === current)
+        ? current
+        : page.threads.find((item) => item.category === "focused")?.id || page.threads[0]?.id || null);
+    }).catch((error: Error) => {
+      if (generation === listGeneration.current) setListError(error.message);
+    }).finally(() => {
+      if (generation === listGeneration.current) setListLoading(false);
+    });
+    return () => { listGeneration.current += 1; };
+  }, [query, view, reload]);
+
+  useEffect(() => {
+    if (!sync || !["queued", "syncing", "classifying"].includes(sync.status)) return;
+    const timer = window.setTimeout(() => setReload((value) => value + 1), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [sync, reload]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const generation = ++detailGeneration.current;
+    getThread(selectedId).then(({ thread }) => {
+      if (generation === detailGeneration.current) setDetail(thread);
+    }).catch((error: Error) => {
+      if (generation === detailGeneration.current) setDetailError({ id: selectedId, message: error.message });
+    });
+    return () => { detailGeneration.current += 1; };
+  }, [selectedId, detailReload]);
+
+  const visibleDetail = detail?.id === selectedId ? detail : null;
+  const visibleDetailError = detailError?.id === selectedId ? detailError.message : null;
+  const detailLoading = Boolean(selectedId && !visibleDetail && !visibleDetailError);
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    const generation = listGeneration.current;
+    setLoadingMore(true);
+    try {
+      const page = await listInbox(query, nextCursor, view);
+      if (generation !== listGeneration.current) return;
+      setThreads((current) => {
+        const known = new Set(current.map((thread) => thread.id));
+        return [...current, ...page.threads.filter((thread) => !known.has(thread.id))];
+      });
+      setNextCursor(page.nextCursor);
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    send(draft);
+  async function retryBackgroundSync() {
+    try {
+      await retrySync();
+      setReload((value) => value + 1);
+    } catch (error) { toast.error((error as Error).message); }
   }
 
-  const visibleEmails = useMemo(() => mockEmails.filter((email) =>
-    (tab === "All" || email.category === tab) &&
-    `${email.sender} ${email.subject} ${email.preview}`.toLowerCase().includes(search.toLowerCase()),
-  ), [tab, search]);
+  const removeThread = useCallback((id: string) => {
+    const remaining = threads.filter((thread) => thread.id !== id);
+    setThreads(remaining);
+    setSelectedId((current) => current === id ? (remaining.find((thread) => thread.category === "focused")?.id || null) : current);
+    if (selectedId === id) setMobileReaderOpen(false);
+  }, [threads, selectedId]);
 
-  return (
-    <main className="min-h-screen bg-[#f6f8fc] p-3 text-slate-900 sm:p-5 lg:h-screen lg:overflow-hidden">
-      <div className="mx-auto grid max-w-[1600px] gap-4 lg:h-full lg:grid-cols-[minmax(350px,0.82fr)_minmax(0,1.18fr)]">
-        <Card className="flex min-h-[520px] flex-col gap-0 overflow-hidden rounded-2xl border-slate-200/80 bg-white py-0 shadow-sm lg:min-h-0">
-          <CardHeader className="flex flex-row items-center gap-3 border-b border-slate-100 px-6 py-5">
-            <span className="grid size-10 place-items-center rounded-xl bg-indigo-600 text-white"><MailCheck className="size-5" /></span>
-            <div><CardTitle className="text-lg tracking-tight">Mailora Agent</CardTitle><p className="mt-0.5 text-xs text-slate-500">Your inbox companion</p></div>
-          </CardHeader>
-          <ScrollArea className="min-h-0 flex-1">
-            <CardContent className="flex flex-col gap-6 px-6 py-7">
-              {messages.length === 0 ? (
-                <div className="py-8">
-                  <span className="mb-5 grid size-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><Sparkles className="size-6" /></span>
-                  <h1 className="text-2xl font-semibold tracking-tight">What can I help with today?</h1>
-                  <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">Start with a question or choose a suggestion below.</p>
-                  <div className="mt-8 flex flex-wrap gap-2">
-                    {prompts.map((prompt) => <Button key={prompt} variant="outline" className="h-auto rounded-full px-4 py-2.5 text-left text-sm font-normal whitespace-normal" onClick={() => send(prompt)}>{prompt}</Button>)}
-                  </div>
-                </div>
-              ) : messages.map((message, index) => (
-                <div key={index} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <Card className={`max-w-[90%] gap-0 rounded-2xl py-0 shadow-none ${message.role === "user" ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-200 bg-slate-50"}`}>
-                    <CardContent className="px-4 py-3 text-sm leading-6">{message.text}</CardContent>
-                  </Card>
-                </div>
-              ))}
-            </CardContent>
-          </ScrollArea>
-          <form onSubmit={onSubmit} className="border-t border-slate-100 bg-white p-4 sm:p-5">
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1.5 focus-within:border-indigo-300 focus-within:ring-2 focus-within:ring-indigo-100">
-              <Input aria-label="Message Mailora Agent" placeholder="Ask Mailora anything about your inbox..." value={draft} onChange={(event) => setDraft(event.target.value)} className="border-0 bg-transparent shadow-none focus-visible:ring-0" />
-              <Button type="submit" size="icon" disabled={!draft.trim()} aria-label="Send message" className="shrink-0 rounded-lg bg-indigo-600 hover:bg-indigo-700"><ArrowUp className="size-4" /></Button>
-            </div>
-          </form>
-        </Card>
+  async function done() {
+    if (!selectedId || busy) return;
+    setBusy(true);
+    try {
+      await markDone(selectedId);
+      removeThread(selectedId);
+      toast.success("Thread marked done");
+    } catch (error) { toast.error((error as Error).message); }
+    finally { setBusy(false); }
+  }
 
-        <Card className="flex min-h-[560px] flex-col gap-0 overflow-hidden rounded-2xl border-slate-200/80 bg-white py-0 shadow-sm lg:min-h-0">
-          <CardHeader className="flex flex-col gap-5 border-b border-slate-100 px-5 py-5 sm:px-7">
-            <div className="flex items-center justify-between gap-4">
-              <div><CardTitle className="flex items-center gap-2 text-xl tracking-tight"><Inbox className="size-5 text-indigo-600" /> Inbox</CardTitle><p className="mt-1 text-xs text-slate-500">A preview of your future workspace</p></div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-10 rounded-full" aria-label="Open account menu"><Avatar className="size-9"><AvatarImage src={user.avatarUrl || undefined} alt={user.name} /><AvatarFallback className="bg-indigo-100 text-sm font-semibold text-indigo-700">{user.name.charAt(0).toUpperCase()}</AvatarFallback></Avatar></Button></DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56"><DropdownMenuLabel className="truncate">{user.email}</DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem asChild><SignOutButton className="w-full justify-start px-2">Sign out</SignOutButton></DropdownMenuItem></DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-            <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><Input aria-label="Search inbox" placeholder="Search inbox" value={search} onChange={(event) => setSearch(event.target.value)} className="h-11 rounded-xl border-slate-200 bg-slate-50 pl-10 shadow-none" /></div>
-            <Tabs value={tab} onValueChange={(value) => setTab(value as Category)} className="w-full">
-              <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b border-slate-100 bg-transparent p-0">
-                {categories.map((category) => <TabsTrigger key={category} value={category} className="rounded-none border-b-2 border-transparent px-3 py-2.5 text-sm text-slate-500 data-[state=active]:border-indigo-600 data-[state=active]:bg-transparent data-[state=active]:text-indigo-700 data-[state=active]:shadow-none">{category}</TabsTrigger>)}
-              </TabsList>
-            </Tabs>
-          </CardHeader>
-          <ScrollArea className="min-h-0 flex-1">
-            <CardContent className="space-y-3 px-5 py-5 sm:px-7">
-              {loading ? <><p className="py-1 text-center text-sm text-slate-500">Syncing your emails...</p>{Array.from({ length: 5 }).map((_, index) => <Card key={index} className="gap-3 rounded-xl border-slate-100 py-0 shadow-none"><CardContent className="flex items-center gap-4 px-4 py-4"><Skeleton className="size-10 shrink-0 rounded-full" /><div className="flex-1 space-y-2"><Skeleton className="h-3 w-1/3" /><Skeleton className="h-3 w-4/5" /></div></CardContent></Card>)}</> : visibleEmails.length === 0 ? (
-                <div className="flex flex-col items-center py-20 text-center"><span className="mb-4 grid size-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-500"><Inbox className="size-6" /></span><p className="font-medium">{search ? "No matching messages" : "Syncing your emails..."}</p></div>
-              ) : visibleEmails.map((email) => (
-                <Card key={email.sender + email.subject} className="gap-0 rounded-xl border-slate-200/80 py-0 shadow-none transition-colors hover:bg-slate-50">
-                  <CardContent className="flex gap-3 px-4 py-4 sm:gap-4"><Avatar className="mt-0.5 size-10 shrink-0"><AvatarFallback className="bg-indigo-50 font-medium text-indigo-700">{email.sender.split(" ").map((word) => word[0]).join("")}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3"><p className="truncate text-sm font-semibold">{email.sender}</p><span className="shrink-0 text-xs text-slate-400">{email.time}</span></div><p className="mt-1 truncate text-sm font-medium text-slate-800">{email.subject}</p><p className="mt-1 truncate text-xs text-slate-500">{email.preview}</p><Badge variant="secondary" className="mt-3 bg-indigo-50 text-[11px] font-medium text-indigo-700">{email.category}</Badge></div></CardContent>
-                </Card>
-              ))}
-            </CardContent>
-          </ScrollArea>
-        </Card>
-      </div>
-    </main>
-  );
+  async function pin() {
+    if (!selectedId || !detail || busy) return;
+    setBusy(true);
+    try {
+      const { pinned } = await setPinned(selectedId, !detail.pinned);
+      setThreads((current) => current.map((thread) => thread.id === selectedId ? { ...thread, pinned } : thread));
+      setDetail((current) => current ? { ...current, pinned } : current);
+      toast.success(pinned ? "Thread pinned" : "Thread unpinned");
+    } catch (error) { toast.error((error as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function snooze(until: string) {
+    if (!selectedId || busy) return;
+    setBusy(true);
+    try {
+      await snoozeThread(selectedId, until);
+      removeThread(selectedId);
+      setSnoozeOpen(false);
+      toast.success("Thread snoozed");
+    } catch (error) { toast.error((error as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function applyAgentAction(action: AgentAction) {
+    if (busy) throw new Error("Wait for the current action to finish");
+    setBusy(true);
+    try {
+      if (action.type === "done") {
+        await markDone(action.threadId);
+        removeThread(action.threadId);
+        toast.success("Thread marked done");
+      } else if (action.type === "pin") {
+        await setPinned(action.threadId, true);
+        setThreads((current) => current.map((thread) => thread.id === action.threadId ? { ...thread, pinned: true } : thread));
+        setDetail((current) => current?.id === action.threadId ? { ...current, pinned: true } : current);
+        toast.success("Thread pinned");
+      } else if (action.type === "snooze" && action.until) {
+        await snoozeThread(action.threadId, action.until);
+        removeThread(action.threadId);
+        toast.success("Thread snoozed");
+      } else {
+        throw new Error("This action cannot be applied");
+      }
+    } finally { setBusy(false); }
+  }
+
+  function afterSend() {
+    setReload((current) => current + 1);
+    setDetailReload((current) => current + 1);
+  }
+
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-900 lg:h-screen lg:overflow-hidden">
+    <header className="border-b border-slate-200 bg-white"><div className="mx-auto flex h-16 max-w-[1700px] items-center justify-between px-4 sm:px-6">
+      <div className="flex items-center gap-2.5"><span className="grid size-9 place-items-center rounded-xl bg-indigo-600 text-white"><MailCheck className="size-5" /></span><span className="text-lg font-semibold tracking-tight">Mailora <span className="font-medium text-slate-500">Autopilot</span></span></div>
+      <div className="flex items-center gap-2"><Button variant="outline" size="sm" className="xl:hidden" onClick={() => setAgentOpen(true)}><Bot className="size-4" /> Ask agent</Button><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-10 rounded-full" aria-label="Open account menu" />}><Avatar className="size-9"><AvatarImage src={user.avatarUrl || undefined} alt={user.name} /><AvatarFallback className="bg-indigo-100 text-indigo-700">{user.name.charAt(0).toUpperCase()}</AvatarFallback></Avatar></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-60"><DropdownMenuLabel className="truncate">{user.email}</DropdownMenuLabel><DropdownMenuSeparator /><SignOutButton menuItem className="w-full justify-start px-2">Sign out</SignOutButton></DropdownMenuContent></DropdownMenu></div>
+    </div></header>
+    <div className="mx-auto grid max-w-[1700px] gap-3 p-3 sm:p-4 lg:h-[calc(100vh-64px)] lg:grid-cols-[minmax(330px,0.42fr)_minmax(0,0.58fr)] lg:gap-4 lg:p-5 xl:grid-cols-[minmax(280px,0.27fr)_minmax(320px,0.33fr)_minmax(0,0.4fr)]">
+      <Card className="hidden min-h-0 flex-col gap-0 rounded-2xl bg-white py-0 shadow-sm xl:flex"><AgentPanel selectedId={selectedId} onAction={applyAgentAction} onSent={afterSend} /></Card>
+      <Card className={`${mobileReaderOpen ? "hidden" : "flex"} min-h-[calc(100vh-90px)] flex-col gap-0 rounded-2xl bg-white py-0 shadow-sm lg:flex lg:min-h-0`}>
+        <ThreadList threads={threads} selectedId={selectedId} onSelect={(id) => { setSelectedId(id); setMobileReaderOpen(true); }} loading={listLoading} loadingMore={loadingMore} nextCursor={nextCursor} error={listError} retry={() => { setListLoading(true); setListError(null); setReload((value) => value + 1); }} loadMore={loadMore} search={search} onSearch={setSearch} view={view} onViewChange={(value) => { setListLoading(true); setView(value); }} sync={sync} onRetrySync={retryBackgroundSync} />
+      </Card>
+      <Card className={`${mobileReaderOpen ? "flex" : "hidden"} min-h-[calc(100vh-90px)] flex-col gap-0 rounded-2xl bg-white py-0 shadow-sm lg:flex lg:min-h-0`}>
+        <ThreadReader thread={visibleDetail} loading={detailLoading} error={visibleDetailError} onRetry={() => { setDetailError(null); setDetailReload((value) => value + 1); }} onBack={() => setMobileReaderOpen(false)} onDone={done} onPin={pin} onSnooze={() => setSnoozeOpen(true)} busy={busy} />
+      </Card>
+    </div>
+    <Dialog open={agentOpen} onOpenChange={setAgentOpen}><DialogContent keepMounted className="flex h-[min(85vh,740px)] max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[480px] xl:hidden"><DialogTitle className="sr-only">Mailora Agent</DialogTitle><AgentPanel selectedId={selectedId} onAction={applyAgentAction} onSent={afterSend} /></DialogContent></Dialog>
+    {snoozeOpen && <SnoozeDialog open={snoozeOpen} onOpenChange={setSnoozeOpen} onSnooze={snooze} busy={busy} />}
+    <Toaster position="top-right" richColors />
+  </main>;
 }
