@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { presentSummary, presentThread } from "../services/thread-presenter.js";
-import { gmailRequest, threadPath } from "../services/gmail.service.js";
-import { encryptTokens } from "../utils/token-vault.js";
+import { presentSummary, presentThread } from "../src/mail/thread-presenter.js";
+import { gmailRequest, threadPath } from "../src/mail/gmail.service.js";
+import { encryptTokens } from "../src/auth/token-vault.js";
 
 process.env.TOKEN_ENCRYPTION_KEY = "b".repeat(64);
 

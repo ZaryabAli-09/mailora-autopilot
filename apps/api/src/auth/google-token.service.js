@@ -1,6 +1,6 @@
 import { OAuth2Client } from "google-auth-library";
-import { ApiError } from "../utils/apiError.js";
-import { decryptTokens, encryptTokens } from "../utils/token-vault.js";
+import { ApiError } from "../common/api-error.js";
+import { decryptTokens, encryptTokens } from "./token-vault.js";
 
 export const requestedScopes = [
   "openid",

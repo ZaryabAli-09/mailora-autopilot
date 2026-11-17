@@ -1,8 +1,8 @@
-import { ApiError } from "../utils/apiError.js";
-import { gmailRequest, threadPath } from "./gmail.service.js";
-import { presentThread } from "./thread-presenter.js";
+import { ApiError } from "../common/api-error.js";
+import { gmailRequest, threadPath } from "../mail/gmail.service.js";
+import { presentThread } from "../mail/thread-presenter.js";
 import { replyRecipient } from "./reply.service.js";
-import { configuredModel, nebiusClient } from "../src/ai/nemotron.js";
+import { configuredModel, nebiusClient } from "../ai/nemotron.js";
 
 const maxThreads = 12;
 

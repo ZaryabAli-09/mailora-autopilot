@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { emailFromGmail } from "../services/sync.service.js";
+import { emailFromGmail } from "../src/mail/sync.service.js";
 
 test("Gmail message mapping stores text and metadata without attachment content", () => {
   const message = {

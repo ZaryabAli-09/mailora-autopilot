@@ -1,8 +1,9 @@
-import { ApiError } from "../utils/apiError.js";
-import { accessTokenFor, invalidateGmailAccess } from "./google-token.service.js";
+import { ApiError } from "../common/api-error.js";
+import { accessTokenFor, invalidateGmailAccess } from "../auth/google-token.service.js";
 
 const apiRoot = "https://gmail.googleapis.com/gmail/v1/users/me";
 
+/** @param {any} user @param {string} path @param {{method?: string, query?: Record<string, any>, body?: any}} options */
 export async function gmailRequest(user, path, { method = "GET", query = {}, body } = {}) {
   const url = new URL(`${apiRoot}${path}`);
   for (const [key, value] of Object.entries(query)) {

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { askAgent } from "../services/agent.service.js";
-import { composeReply, replyRecipient } from "../services/reply.service.js";
-import { encryptTokens } from "../utils/token-vault.js";
+import { askAgent } from "../src/agent/agent-domain.service.js";
+import { composeReply, replyRecipient } from "../src/agent/reply.service.js";
+import { encryptTokens } from "../src/auth/token-vault.js";
 
 process.env.TOKEN_ENCRYPTION_KEY = "c".repeat(64);
 

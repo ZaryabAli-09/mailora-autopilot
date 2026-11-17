@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import { test } from "node:test";
 import { OAuth2Client } from "google-auth-library";
-import { encryptTokens, decryptTokens } from "../utils/token-vault.js";
-import { gmailConnected } from "../routes/auth.routes.js";
+import jwt from "jsonwebtoken";
+import { encryptTokens, decryptTokens } from "../src/auth/token-vault.js";
+import { gmailConnected } from "../src/auth/auth.service.ts";
+import { User } from "../src/database/models/user.model.js";
+import { AgentService } from "../src/agent/agent.service.ts";
+import { MailService } from "../src/mail/mail.service.ts";
 
 process.env.NODE_ENV = "test";
 process.env.GOOGLE_CLIENT_ID = "test-client-id";
@@ -34,11 +37,23 @@ test("Gmail connection requires a live token with usable Gmail scope", async () 
 });
 
 test("one Google flow requests profile and all Gmail scopes with offline access", async (t) => {
-  const { app } = await import("../index.js");
-  const server = createServer(app);
-  await new Promise((resolve) => server.listen(0, resolve));
-  t.after(() => server.close());
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const { createApp } = await import("../src/app.ts");
+  const app = await createApp();
+  await app.listen(0);
+  t.after(() => app.close());
+  const base = await app.getUrl();
+
+  const health = await fetch(`${base}/health`);
+  assert.equal(health.status, 200);
+  assert.deepEqual(await health.json(), { status: "ok" });
+  const privateInbox = await fetch(`${base}/api/inbox`);
+  assert.equal(privateInbox.status, 401);
+  assert.deepEqual(await privateInbox.json(), { message: "Not signed in" });
+  const privateAgent = await fetch(`${base}/api/agent/ask`, { method: "POST", headers: { "X-Mailora-Request": "1" } });
+  assert.equal(privateAgent.status, 401);
+  const missing = await fetch(`${base}/missing`);
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), { message: "Route not found" });
 
   const response = await fetch(`${base}/auth/google`, { redirect: "manual" });
   assert.equal(response.status, 302);
@@ -75,4 +90,41 @@ test("one Google flow requests profile and all Gmail scopes with offline access"
   const logout = await fetch(`${base}/auth/logout`, { method: "POST", headers: { "X-Mailora-Request": "1" } });
   assert.equal(logout.status, 204);
   assert.match(logout.headers.get("set-cookie"), /mailora_session=;/);
+  const rejectedLogout = await fetch(`${base}/auth/logout`, { method: "POST" });
+  assert.equal(rejectedLogout.status, 403);
+  assert.deepEqual(await rejectedLogout.json(), { message: "Request rejected" });
+
+  const findById = User.findById;
+  User.findById = () => ({ select: async () => ({ id: "test-user", email: "me@example.com" }) });
+  t.after(() => { User.findById = findById; });
+  const session = jwt.sign({}, process.env.JWT_SECRET, { subject: "test-user" });
+  const cookie = `mailora_session=${session}`;
+  const badThread = await fetch(`${base}/api/threads/bad`, { headers: { Cookie: cookie } });
+  assert.equal(badThread.status, 400);
+  assert.deepEqual(await badThread.json(), { message: "Invalid thread ID" });
+  const badAsk = await fetch(`${base}/api/agent/ask`, {
+    method: "POST", headers: { Cookie: cookie, "X-Mailora-Request": "1", "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: "" }),
+  });
+  assert.equal(badAsk.status, 400);
+  assert.deepEqual(await badAsk.json(), { message: "Enter a request under 2,000 characters" });
+
+  const agentService = app.get(AgentService);
+  const mailService = app.get(MailService);
+  const originalAsk = agentService.ask;
+  const originalDone = mailService.done;
+  agentService.ask = async () => ({ answer: "Hello", actions: [], contextCount: 0 });
+  mailService.done = async () => ({ done: true });
+  t.after(() => { agentService.ask = originalAsk; mailService.done = originalDone; });
+  const agentSuccess = await fetch(`${base}/api/agent/ask`, {
+    method: "POST", headers: { Cookie: cookie, "X-Mailora-Request": "1", "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: "Hello" }),
+  });
+  assert.equal(agentSuccess.status, 200);
+  assert.deepEqual(await agentSuccess.json(), { answer: "Hello", actions: [], contextCount: 0 });
+  const doneSuccess = await fetch(`${base}/api/threads/abcde/done`, {
+    method: "POST", headers: { Cookie: cookie, "X-Mailora-Request": "1" },
+  });
+  assert.equal(doneSuccess.status, 200);
+  assert.deepEqual(await doneSuccess.json(), { done: true });
 });

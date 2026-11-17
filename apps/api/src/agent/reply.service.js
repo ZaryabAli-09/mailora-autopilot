@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import MailComposer from "nodemailer/lib/mail-composer/index.js";
 import addressparser from "nodemailer/lib/addressparser/index.js";
-import { ApiError } from "../utils/apiError.js";
-import { AgentSend } from "../models/agent-send.model.js";
-import { gmailRequest, threadPath } from "./gmail.service.js";
+import { ApiError } from "../common/api-error.js";
+import { AgentSend } from "../database/models/agent-send.model.js";
+import { gmailRequest, threadPath } from "../mail/gmail.service.js";
 
 function header(message, name) {
   return message.payload?.headers?.find((item) => item.name.toLowerCase() === name.toLowerCase())?.value || "";

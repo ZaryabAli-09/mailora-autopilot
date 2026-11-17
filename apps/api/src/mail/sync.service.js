@@ -1,7 +1,7 @@
-import { Email } from "../models/email.model.js";
-import { SyncState } from "../models/sync-state.model.js";
-import { User } from "../models/user.model.js";
-import { classifyEmail } from "../src/ai/nemotron.js";
+import { Email } from "../database/models/email.model.js";
+import { SyncState } from "../database/models/sync-state.model.js";
+import { User } from "../database/models/user.model.js";
+import { classifyEmail } from "../ai/nemotron.js";
 import { gmailRequest } from "./gmail.service.js";
 import { messageBodyText } from "./thread-presenter.js";
 
@@ -126,4 +126,5 @@ export function startSyncWorker() {
   void refresh().catch((error) => console.error("Could not schedule Gmail sync", { type: error?.name || "Error" }));
   const timer = setInterval(() => void refresh().catch((error) => console.error("Could not schedule Gmail sync", { type: error?.name || "Error" })), staleAfterMs);
   timer.unref();
+  return timer;
 }

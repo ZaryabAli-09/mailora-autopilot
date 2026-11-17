@@ -1,6 +1,6 @@
-import { Snooze } from "../models/snooze.model.js";
-import { User } from "../models/user.model.js";
-import { Email } from "../models/email.model.js";
+import { Snooze } from "../database/models/snooze.model.js";
+import { User } from "../database/models/user.model.js";
+import { Email } from "../database/models/email.model.js";
 import { gmailRequest, threadPath } from "./gmail.service.js";
 
 let running = false;
@@ -55,4 +55,5 @@ export function startSnoozeWorker() {
     processDueSnoozes().catch((error) => console.error("Snooze worker failed", error));
   }, 30_000);
   interval.unref();
+  return interval;
 }
