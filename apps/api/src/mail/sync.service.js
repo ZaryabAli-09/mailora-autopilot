@@ -5,6 +5,7 @@ import { classifyEmail } from "../ai/nemotron.js";
 import { gmailRequest } from "./gmail.service.js";
 import { messageBodyText } from "./thread-presenter.js";
 import { messageHeader } from "./message-header.js";
+import { mapLimited } from "../common/map-limited.js";
 
 const active = new Set();
 const maxMessages = 500;
@@ -25,13 +26,6 @@ export function emailFromGmail(message) {
     labelIds: (message.labelIds || []).filter((label) => typeof label === "string").slice(0, 100),
     hasUnsubscribeHeader: Boolean(messageHeader(message, "List-Unsubscribe")),
   };
-}
-
-async function mapLimited(items, limit, fn) {
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) await fn(items[next++]);
-  }));
 }
 
 export async function syncUser(user) {

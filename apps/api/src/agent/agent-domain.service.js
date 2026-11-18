@@ -3,20 +3,9 @@ import { gmailRequest, threadPath } from "../mail/gmail.service.js";
 import { presentThread } from "../mail/thread-presenter.js";
 import { replyRecipient } from "./reply.service.js";
 import { configuredModel, nebiusClient } from "../ai/nemotron.js";
+import { mapLimited } from "../common/map-limited.js";
 
 const maxThreads = 12;
-
-async function mapLimited(items, limit, fn) {
-  const result = new Array(items.length);
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      result[index] = await fn(items[index]);
-    }
-  }));
-  return result;
-}
 
 function compactThread(thread) {
   const detail = presentThread(thread);
