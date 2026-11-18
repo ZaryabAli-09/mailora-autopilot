@@ -51,6 +51,7 @@ export function presentThread(thread, { pinned = false } = {}) {
       id: message.id,
       from: messageHeader(message, "From"),
       to: messageHeader(message, "To"),
+      cc: messageHeader(message, "Cc"),
       date: new Date(Number(message.internalDate || Date.now())).toISOString(),
       body: messageBodyText(message.payload),
     })),

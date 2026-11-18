@@ -24,6 +24,7 @@ export type ThreadDetail = ThreadSummary & {
     id: string;
     from: string;
     to: string;
+    cc: string;
     date: string;
     body: string;
   }[];
