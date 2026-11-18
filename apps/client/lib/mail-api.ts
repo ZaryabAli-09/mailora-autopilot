@@ -25,6 +25,7 @@ export type ThreadDetail = ThreadSummary & {
     from: string;
     to: string;
     cc: string;
+    hasAttachments: boolean;
     date: string;
     body: string;
   }[];

@@ -24,6 +24,10 @@ function labelsFor(thread) {
   return new Set((thread.messages || []).flatMap((message) => message.labelIds || []));
 }
 
+function hasAttachment(part) {
+  return Boolean(part?.filename) || (part?.parts || []).some(hasAttachment);
+}
+
 export function presentSummary(thread, { pinned = false } = {}) {
   const messages = thread.messages || [];
   const latest = messages.at(-1) || {};
@@ -52,6 +56,7 @@ export function presentThread(thread, { pinned = false } = {}) {
       from: messageHeader(message, "From"),
       to: messageHeader(message, "To"),
       cc: messageHeader(message, "Cc"),
+      hasAttachments: hasAttachment(message.payload),
       date: new Date(Number(message.internalDate || Date.now())).toISOString(),
       body: messageBodyText(message.payload),
     })),
