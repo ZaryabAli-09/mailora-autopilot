@@ -1,8 +1,5 @@
 import { convert } from "html-to-text";
-
-function header(message, name) {
-  return message.payload?.headers?.find((item) => item.name.toLowerCase() === name.toLowerCase())?.value || "";
-}
+import { messageHeader } from "./message-header.js";
 
 function decodeBody(data) {
   if (!data) return "";
@@ -35,8 +32,8 @@ export function presentSummary(thread, { pinned = false } = {}) {
     labels.has("CATEGORY_UPDATES") ? "updates" : "focused";
   return {
     id: thread.id,
-    subject: header(latest, "Subject") || header(messages[0] || {}, "Subject") || "(no subject)",
-    sender: header(latest, "From") || "Unknown sender",
+    subject: messageHeader(latest, "Subject") || messageHeader(messages[0] || {}, "Subject") || "(no subject)",
+    sender: messageHeader(latest, "From") || "Unknown sender",
     snippet: thread.snippet || latest.snippet || "",
     lastMessageAt: new Date(Number(latest.internalDate || Date.now())).toISOString(),
     messageCount: messages.length,
@@ -52,8 +49,8 @@ export function presentThread(thread, { pinned = false } = {}) {
     ...presentSummary(thread, { pinned }),
     messages: (thread.messages || []).map((message) => ({
       id: message.id,
-      from: header(message, "From"),
-      to: header(message, "To"),
+      from: messageHeader(message, "From"),
+      to: messageHeader(message, "To"),
       date: new Date(Number(message.internalDate || Date.now())).toISOString(),
       body: messageBodyText(message.payload),
     })),

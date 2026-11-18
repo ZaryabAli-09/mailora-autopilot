@@ -4,14 +4,11 @@ import { User } from "../database/models/user.model.js";
 import { classifyEmail } from "../ai/nemotron.js";
 import { gmailRequest } from "./gmail.service.js";
 import { messageBodyText } from "./thread-presenter.js";
+import { messageHeader } from "./message-header.js";
 
 const active = new Set();
 const maxMessages = 500;
 const staleAfterMs = 15 * 60_000;
-
-function header(message, name) {
-  return message.payload?.headers?.find((item) => item.name.toLowerCase() === name.toLowerCase())?.value || "";
-}
 
 export function emailFromGmail(message) {
   if (!message?.id || !message.threadId) throw new Error("Gmail message is missing an ID");
@@ -20,13 +17,13 @@ export function emailFromGmail(message) {
   return {
     gmailMessageId: message.id,
     threadId: message.threadId,
-    from: header(message, "From").slice(0, 320),
-    subject: header(message, "Subject").slice(0, 500),
+    from: messageHeader(message, "From").slice(0, 320),
+    subject: messageHeader(message, "Subject").slice(0, 500),
     date,
     snippet: (message.snippet || "").slice(0, 1_000),
     body: messageBodyText(message.payload).slice(0, 12_000),
     labelIds: (message.labelIds || []).filter((label) => typeof label === "string").slice(0, 100),
-    hasUnsubscribeHeader: Boolean(header(message, "List-Unsubscribe")),
+    hasUnsubscribeHeader: Boolean(messageHeader(message, "List-Unsubscribe")),
   };
 }
 

@@ -4,10 +4,7 @@ import addressparser from "nodemailer/lib/addressparser/index.js";
 import { ApiError } from "../common/api-error.js";
 import { AgentSend } from "../database/models/agent-send.model.js";
 import { gmailRequest, threadPath } from "../mail/gmail.service.js";
-
-function header(message, name) {
-  return message.payload?.headers?.find((item) => item.name.toLowerCase() === name.toLowerCase())?.value || "";
-}
+import { messageHeader } from "../mail/message-header.js";
 
 function addresses(value) {
   return addressparser(value).filter((entry) => entry.address && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(entry.address));
@@ -15,15 +12,15 @@ function addresses(value) {
 
 export function replyRecipient(thread, userEmail) {
   const latestExternal = [...(thread.messages || [])].reverse().find((message) =>
-    addresses(header(message, "From")).some((entry) => entry.address.toLowerCase() !== userEmail.toLowerCase()));
+    addresses(messageHeader(message, "From")).some((entry) => entry.address.toLowerCase() !== userEmail.toLowerCase()));
   if (!latestExternal) return null;
-  const sender = addresses(header(latestExternal, "From")).find((entry) => entry.address.toLowerCase() !== userEmail.toLowerCase());
-  const replyTo = addresses(header(latestExternal, "Reply-To")).find((entry) => entry.address.toLowerCase() !== userEmail.toLowerCase());
+  const sender = addresses(messageHeader(latestExternal, "From")).find((entry) => entry.address.toLowerCase() !== userEmail.toLowerCase());
+  const replyTo = addresses(messageHeader(latestExternal, "Reply-To")).find((entry) => entry.address.toLowerCase() !== userEmail.toLowerCase());
   return {
     address: (replyTo || sender).address,
-    messageId: header(latestExternal, "Message-ID"),
-    references: header(latestExternal, "References"),
-    subject: header(latestExternal, "Subject") || header(thread.messages?.[0] || {}, "Subject") || "(no subject)",
+    messageId: messageHeader(latestExternal, "Message-ID"),
+    references: messageHeader(latestExternal, "References"),
+    subject: messageHeader(latestExternal, "Subject") || messageHeader(thread.messages?.[0] || {}, "Subject") || "(no subject)",
   };
 }
 
