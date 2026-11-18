@@ -50,10 +50,11 @@ export async function processDueSnoozes() {
 }
 
 export function startSnoozeWorker() {
-  processDueSnoozes().catch((error) => console.error("Snooze worker failed", error));
-  const interval = setInterval(() => {
+  function run() {
     processDueSnoozes().catch((error) => console.error("Snooze worker failed", error));
-  }, 30_000);
+  }
+  run();
+  const interval = setInterval(run, 30_000);
   interval.unref();
   return interval;
 }
